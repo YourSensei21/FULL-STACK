@@ -1,60 +1,68 @@
-import readline from "readline";
+const express = require('express');
+const router = express.Router();
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
+const LOCK_TIMEOUT = 60 * 1000;
+
+const seats = {
+    '1': { status: 'available' },
+    '2': { status: 'available' },
+    '3': { status: 'available' },
+    '4': { status: 'available' },
+    '5': { status: 'available' }
+};
+
+router.get('/seats', (req, res) => {
+    res.status(200).json(seats);
 });
 
-const employees = [];
+router.post('/lock/:seatId', (req, res) => {
+    const { seatId } = req.params;
+    const seat = seats[seatId];
 
-function handleInput(choice) {
-  switch (choice.trim()) {
-    case "1":
-      rl.question("Enter your name: ", (name) => {
-        const empId = Date.now();
-        const newEmp = {
-          id: empId,
-          name: name.trim(),
-        };
-        employees.push(newEmp);
-        console.log(`Employee ID: ${empId} | NAME: ${name} added`);
-        showMenu();
-      });
-      break;
-    case "2":
-      employees.forEach((emp, index) => {
-        console.log(`${index + 1}. Employee ID: ${emp.id} | NAME: ${emp.name}`);
-      });
-      showMenu();
-      break;
-    case "3":
-      rl.question("Enter employee ID to remove: ", (id) => {
-        employees.forEach((emp, index) => {
-          if (emp.id == id.trim()) {
-            console.log("he");
-            employees.splice(index, 1);
-            console.log(`Employee ID: ${id} removed`);
-          }
-        });
-        showMenu();
-      });
-      break;
-    case "4":
-      rl.close();
-      break;
-    default:
-      console.log("Invalid Choice");
-      showMenu();
-  }
-}
+    if (!seat) {
+        return res.status(404).json({ message: 'Seat not found' });
+    }
 
-function showMenu() {
-  console.log("\nEmployee Management System\n");
-  console.log("1. Add Employee");
-  console.log("2. List Employees");
-  console.log("3. Remove Employee");
-  console.log("4. Exit");
-  rl.question("\nEnter your choice: ", handleInput);
-}
+    const isLockedAndValid = seat.status === 'locked' && seat.lockExpiresAt > Date.now();
 
-showMenu();
+    if (seat.status === 'booked' || isLockedAndValid) {
+        return res.status(400).json({ message: 'Seat is not available for locking' });
+    }
+
+    seat.status = 'locked';
+    seat.lockExpiresAt = Date.now() + LOCK_TIMEOUT;
+
+    setTimeout(() => {
+        if (seats[seatId].status === 'locked' && seats[seatId].lockExpiresAt <= Date.now()) {
+            seats[seatId].status = 'available';
+            delete seats[seatId].lockExpiresAt;
+        }
+    }, LOCK_TIMEOUT);
+
+    res.status(200).json({ message: `Seat ${seatId} locked successfully. Confirm within 1 minute.` });
+});
+
+router.post('/confirm/:seatId', (req, res) => {
+    const { seatId } = req.params;
+    const seat = seats[seatId];
+
+    if (!seat) {
+        return res.status(404).json({ message: 'Seat not found' });
+    }
+
+    if (seat.status !== 'locked' || seat.lockExpiresAt <= Date.now()) {
+        if (seat.lockExpiresAt <= Date.now()) {
+             seat.status = 'available';
+             delete seat.lockExpiresAt;
+        }
+        return res.status(400).json({ message: 'Seat is not locked and cannot be booked' });
+    }
+
+    seat.status = 'booked';
+    delete seat.lockExpiresAt;
+
+    res.status(200).json({ message: `Seat ${seatId} booked successfully!` });
+});
+
+module.exports = router;
+
